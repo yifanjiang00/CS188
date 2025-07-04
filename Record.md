@@ -12,7 +12,34 @@ python基础：<br>
 通过测试：<br>
 ![1751557868421](image/Record/1751557868421.png)<br>
 
-## Project1
+## Project1:Search
+Project1要求实现单智能体搜索的几种算法<br>
 
-## Project2
+### Q1
+DFS实现
+```python
+def depthFirstSearch(problem: SearchProblem):
+    path=[]
+    visited=[]
+    stack=util.Stack()
+    stack.push((problem.getStartState(),[]))
+    while not stack.isEmpty():
+        state, path = stack.pop()
+        if problem.isGoalState(state):
+            return path
+        if state not in visited:
+            visited.append(state)
+            for successor, action, stepCost in problem.getSuccessors(state):
+                new_path = path + [action]
+                stack.push((successor, new_path))
+    return path  # If no solution is found, return an empty list  
+    util.raiseNotDefined()
+```
+
+### Q2
+BFS实现
+
+
+## Project2:Multi-Agent Search
+
 
