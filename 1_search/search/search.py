@@ -106,11 +106,45 @@ def depthFirstSearch(problem: SearchProblem):
 def breadthFirstSearch(problem: SearchProblem):
     """Search the shallowest nodes in the search tree first."""
     "*** YOUR CODE HERE ***"
+    path=[]
+    visited=[]
+    queue=util.Queue()
+    queue.push((problem.getStartState(),[]))
+    while not queue.isEmpty():
+        state, path = queue.pop()
+        if problem.isGoalState(state):
+            return path
+        if state not in visited:
+            visited.append(state)
+            for successor, action, stepCost in problem.getSuccessors(state):
+                new_path = path + [action]
+                queue.push((successor, new_path))
+    return path  # If no solution is found, return an empty list  
     util.raiseNotDefined()
 
 def uniformCostSearch(problem: SearchProblem):
     """Search the node of least total cost first."""
     "*** YOUR CODE HERE ***"
+    visited = []
+
+    heap = util.PriorityQueue()
+    start = (problem.getStartState(), [], 0)
+    heap.push(start, 0)  # 将起始状态加入堆中,初始路径为空,初始cost为0
+
+    while not heap.isEmpty():
+        (state, path, cost) = heap.pop()
+        if problem.isGoalState(state):
+            return path #找到GoalState,返回路径
+
+        if state not in visited:
+            visited.append(state)
+            for currState, currPath, currCost in problem.getSuccessors(state):
+                newPath = path + [currPath]
+                newCost = cost + currCost
+                newState = (currState, newPath, newCost)
+                heap.push(newState, newCost) #找到与当前state相连的所有状态,将其加入堆中
+
+    return path
     util.raiseNotDefined()
 
 def nullHeuristic(state, problem=None):
@@ -123,6 +157,26 @@ def nullHeuristic(state, problem=None):
 def aStarSearch(problem: SearchProblem, heuristic=nullHeuristic):
     """Search the node that has the lowest combined cost and heuristic first."""
     "*** YOUR CODE HERE ***"
+    visited = []
+
+    heap = util.PriorityQueue()
+    start = (problem.getStartState(), [], 0)
+    heap.push(start, 0)
+
+    while not heap.isEmpty():
+        (state, path, cost) = heap.pop()
+        if problem.isGoalState(state):
+            return path #找到GoalState,返回路径
+
+        if state not in visited:
+            visited.append(state)
+            for currState, currPath, currCost in problem.getSuccessors(state):
+                newPath = path + [currPath]
+                newCost = cost + currCost
+                newState = (currState, newPath, newCost)
+                heap.push(newState, newCost+ heuristic(currState, problem)) #将当前状态的cost与heuristic值相加,作为优先级
+
+    return path
     util.raiseNotDefined()
 
 
