@@ -35,7 +35,7 @@ def depthFirstSearch(problem: SearchProblem):
 ### Q2
 BFS实现<br>
 只需要将DFS实现中的stack换成queue就行了<br>
-```pyhton
+```python
 def breadthFirstSearch(problem: SearchProblem):
     """Search the shallowest nodes in the search tree first."""
     "*** YOUR CODE HERE ***"

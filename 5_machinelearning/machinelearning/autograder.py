@@ -5,10 +5,9 @@
 ################################################################################
 
 import optparse
-import pickle
-import random
 import sys
 import traceback
+
 
 class WritableNull:
     def write(self, string):
@@ -227,12 +226,12 @@ import numpy as np
 import matplotlib
 import contextlib
 
-import nn
+from torch import nn, Tensor
+import torch
 import backend
 
 def check_dependencies():
     import matplotlib.pyplot as plt
-    import time
     fig, ax = plt.subplots(1, 1)
     ax.set_xlim([-1, 1])
     ax.set_ylim([-1, 1])
@@ -267,65 +266,58 @@ def verify_node(node, expected_type, expected_shape, method_name):
     elif expected_type == 'loss':
         assert node is not None, (
             "{} should return an instance a loss node, not None".format(method_name))
-        assert isinstance(node, (nn.SquareLoss, nn.SoftmaxLoss)), (
+        assert isinstance(node, (nn.modules.loss._Loss)), (
             "{} should return a loss node, instead got type {!r}".format(
             method_name, type(node).__name__))
-    elif expected_type == 'node':
+    elif expected_type == 'tensor':
         assert node is not None, (
             "{} should return a node object, not None".format(method_name))
-        assert isinstance(node, nn.Node), (
+        assert isinstance(node, Tensor), (
             "{} should return a node object, instead got type {!r}".format(
             method_name, type(node).__name__))
     else:
         assert False, "If you see this message, please report a bug in the autograder"
 
     if expected_type != 'loss':
-        assert all([(expected is '?' or actual == expected) for (actual, expected) in zip(node.data.shape, expected_shape)]), (
+        assert all([(expected == '?' or actual == expected) for (actual, expected) in zip(node.detach().numpy().shape, expected_shape)]), (
             "{} should return an object with shape {}, got {}".format(
-                method_name, nn.format_shape(expected_shape), nn.format_shape(node.data.shape)))
-
-def trace_node(node_to_trace):
-    """
-    Returns a set containing the node and all ancestors in the computation graph
-    """
-    nodes = set()
-    tape = []
-
-    def visit(node):
-        if node not in nodes:
-            for parent in node.parents:
-                visit(parent)
-            nodes.add(node)
-            tape.append(node)
-
-    visit(node_to_trace)
-
-    return nodes
+                method_name, expected_shape, node.shape))
 
 @test('q1', points=6)
 def check_perceptron(tracker):
     import models
+    import train
 
     print("Sanity checking perceptron...")
     np_random = np.random.RandomState(0)
-    # Check that the perceptron weights are initialized to a vector with `dimensions` entries.
+    
+    # Check that the perceptron weights are initialized to a single vector with `dimensions` entries.
     for dimensions in range(1, 10):
         p = models.PerceptronModel(dimensions)
         p_weights = p.get_weights()
-        verify_node(p_weights, 'parameter', (1, dimensions), "PerceptronModel.get_weights()")
 
-    # Check that run returns a node, and that the score in the node is correct
+        number_of_parameters = 0
+
+        for param in p.parameters():
+            number_of_parameters += 1
+            verify_node(param, 'parameter', (1, dimensions), 'PerceptronModel.parameters()')
+
+        assert number_of_parameters == 1, ('Perceptron Model should only have 1 parameter')
+
+    # Check that forward returns a Tensor, and that the score in the node is correct
     for dimensions in range(1, 10):
         p = models.PerceptronModel(dimensions)
-        p_weights = p.get_weights()
-        verify_node(p_weights, 'parameter', (1, dimensions), "PerceptronModel.get_weights()")
         point = np_random.uniform(-10, 10, (1, dimensions))
-        score = p.run(nn.Constant(point))
-        verify_node(score, 'node', (1, 1), "PerceptronModel.run()")
-        calculated_score = nn.as_scalar(score)
-        expected_score = float(np.dot(point.flatten(), p_weights.data.flatten()))
+        score = p(Tensor(point))
+        verify_node(score, 'tensor', (1,), "PerceptronModel.forward()")
+        calculated_score = score.item()
+        
+        # Compare run output to actual value
+        for param in p.parameters():
+            expected_score = float(np.dot(point.flatten(), param.detach().numpy().flatten()))
+
         assert np.isclose(calculated_score, expected_score), (
-            "The score computed by PerceptronModel.run() ({:.4f}) does not match the expected score ({:.4f})".format(
+            "The score computed by PerceptronModel.forward() ({:.4f}) does not match the expected score ({:.4f})".format(
             calculated_score, expected_score))
 
     # Check that get_prediction returns the correct values, including the
@@ -334,7 +326,7 @@ def check_perceptron(tracker):
         p = models.PerceptronModel(dimensions)
         random_point = np_random.uniform(-10, 10, (1, dimensions))
         for point in (random_point, np.zeros_like(random_point)):
-            prediction = p.get_prediction(nn.Constant(point))
+            prediction = p.get_prediction(Tensor(point))
             assert prediction == 1 or prediction == -1, (
                 "PerceptronModel.get_prediction() should return 1 or -1, not {}".format(
                 prediction))
@@ -355,17 +347,20 @@ def check_perceptron(tracker):
     dimensions = 2
     for multiplier in (-5, -2, 2, 5):
         p = models.PerceptronModel(dimensions)
-        orig_weights = p.get_weights().data.reshape((1, dimensions)).copy()
+        orig_weights = p.get_weights().data.reshape((1, dimensions)).detach().numpy().copy()
         if np.abs(orig_weights).sum() == 0.0:
             # This autograder test doesn't work when weights are exactly zero
             continue
+        
         point = multiplier * orig_weights
-        sanity_dataset = backend.Dataset(
+
+        sanity_dataset = backend.Custom_Dataset(
             x=np.tile(point, (500, 1)),
             y=np.ones((500, 1)) * -1.0
         )
-        p.train(sanity_dataset)
-        new_weights = p.get_weights().data.reshape((1, dimensions))
+        
+        train.train_perceptron(p,sanity_dataset)
+        new_weights = p.get_weights().data.reshape((1, dimensions)).detach().numpy()
 
         if multiplier < 0:
             expected_weights = orig_weights
@@ -391,7 +386,7 @@ def check_perceptron(tracker):
     model = models.PerceptronModel(3)
     dataset = backend.PerceptronDataset(model)
 
-    model.train(dataset)
+    train.train_perceptron(model, dataset)
     backend.maybe_sleep_and_close(1)
 
     assert dataset.epoch != 0, "Perceptron code never iterated over the training data"
@@ -406,61 +401,57 @@ def check_perceptron(tracker):
 
 @test('q2', points=6)
 def check_regression(tracker):
+    import train
+    import losses
     import models
     model = models.RegressionModel()
-    dataset = backend.RegressionDataset(model)
-
+    dataset = backend.RegressionDataset(model=model)
     detected_parameters = None
-    for batch_size in (1, 2, 4):
-        inp_x = nn.Constant(dataset.x[:batch_size])
-        inp_y = nn.Constant(dataset.y[:batch_size])
-        output_node = model.run(inp_x)
-        verify_node(output_node, 'node', (batch_size, 1), "RegressionModel.run()")
-        trace = trace_node(output_node)
-        assert inp_x in trace, "Node returned from RegressionModel.run() does not depend on the provided input (x)"
-
-        if detected_parameters is None:
-            detected_parameters = [node for node in trace if isinstance(node, nn.Parameter)]
-
-        for node in trace:
-            assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                "Calling RegressionModel.run() multiple times should always re-use the same parameters, but a new nn.Parameter object was detected")
 
     for batch_size in (1, 2, 4):
-        inp_x = nn.Constant(dataset.x[:batch_size])
-        inp_y = nn.Constant(dataset.y[:batch_size])
-        loss_node = model.get_loss(inp_x, inp_y)
-        verify_node(loss_node, 'loss', None, "RegressionModel.get_loss()")
-        trace = trace_node(loss_node)
-        assert inp_x in trace, "Node returned from RegressionModel.get_loss() does not depend on the provided input (x)"
-        assert inp_y in trace, "Node returned from RegressionModel.get_loss() does not depend on the provided labels (y)"
+        inp_x = torch.tensor(dataset.x[:batch_size], dtype=torch.float, requires_grad=True)
+        inp_y = torch.tensor(dataset.y[:batch_size], dtype=torch.float, requires_grad=True) 
 
-        for node in trace:
-            assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                "RegressionModel.get_loss() should not use additional parameters not used by RegressionModel.run()")
+        loss = losses.regression_loss(model(inp_x), inp_y)
+
+        verify_node(loss, 'tensor', (1,), "regression_loss()")
+    
+
+        grad_y = torch.autograd.grad(loss, inp_x, allow_unused=True, retain_graph=True)
+        grad_x = torch.autograd.grad(loss, inp_y, allow_unused=True, retain_graph=True)
+        
+        assert grad_x[0] != None, "Node returned from regression_loss() does not depend on the provided input (x), check RegressionModel.forward()"
+        assert grad_y[0] != None, "Node returned from regression_loss() does not depend on the provided labels (y), check regression_loss()"
+
+
 
     tracker.add_points(2) # Partial credit for passing sanity checks
 
-    model.train(dataset)
+    train.train_regression(model, dataset)
     backend.maybe_sleep_and_close(1)
 
-    train_loss = model.get_loss(nn.Constant(dataset.x), nn.Constant(dataset.y))
-    verify_node(train_loss, 'loss', None, "RegressionModel.get_loss()")
-    train_loss = nn.as_scalar(train_loss)
+    data_x = torch.tensor(dataset.x, dtype=torch.float32)
+    labels = torch.tensor(dataset.y, dtype=torch.float32)
+    train_loss = losses.regression_loss(model(data_x), labels)
+    verify_node(train_loss, 'tensor', (1,), "RegressionModel.get_loss()")
+    train_loss = train_loss.item()
 
     # Re-compute the loss ourselves: otherwise get_loss() could be hard-coded
     # to always return zero
-    train_predicted = model.run(nn.Constant(dataset.x))
-    verify_node(train_predicted, 'node', (dataset.x.shape[0], 1), "RegressionModel.run()")
-    sanity_loss = 0.5 * np.mean((train_predicted.data - dataset.y)**2)
+    train_predicted = model(data_x)
+
+    verify_node(train_predicted, 'tensor', (dataset.x.shape[0], 1), "RegressionModel()")
+    error = labels - train_predicted
+    sanity_loss = torch.mean((error.detach())**2)
 
     assert np.isclose(train_loss, sanity_loss), (
-        "RegressionModel.get_loss() returned a loss of {:.4f}, "
+        "loss.regression_loss() returned a loss of {:.4f}, "
         "but the autograder computed a loss of {:.4f} "
-        "based on the output of RegressionModel.run()".format(
+        "based on the output of RegressionModel()".format(
             train_loss, sanity_loss))
 
     loss_threshold = 0.02
+    
     if train_loss <= loss_threshold:
         print("Your final loss is: {:f}".format(train_loss))
         tracker.add_points(4)
@@ -470,44 +461,37 @@ def check_regression(tracker):
 @test('q3', points=6)
 def check_digit_classification(tracker):
     import models
+    import train 
+    import losses
+
     model = models.DigitClassificationModel()
     dataset = backend.DigitClassificationDataset(model)
 
     detected_parameters = None
+    
     for batch_size in (1, 2, 4):
-        inp_x = nn.Constant(dataset.x[:batch_size])
-        inp_y = nn.Constant(dataset.y[:batch_size])
-        output_node = model.run(inp_x)
-        verify_node(output_node, 'node', (batch_size, 10), "DigitClassificationModel.run()")
-        trace = trace_node(output_node)
-        assert inp_x in trace, "Node returned from DigitClassificationModel.run() does not depend on the provided input (x)"
+        inp_x = torch.tensor(dataset.x[:batch_size], dtype=torch.float, requires_grad=True)
+        inp_y = torch.tensor(dataset.y[:batch_size], dtype=torch.float, requires_grad=True) 
 
-        if detected_parameters is None:
-            detected_parameters = [node for node in trace if isinstance(node, nn.Parameter)]
+        loss = losses.digitclassifier_loss(model(inp_x), inp_y)
 
-        for node in trace:
-            assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                "Calling DigitClassificationModel.run() multiple times should always re-use the same parameters, but a new nn.Parameter object was detected")
+        verify_node(loss, 'tensor', (1,), "digitclassifier_loss()")
 
-    for batch_size in (1, 2, 4):
-        inp_x = nn.Constant(dataset.x[:batch_size])
-        inp_y = nn.Constant(dataset.y[:batch_size])
-        loss_node = model.get_loss(inp_x, inp_y)
-        verify_node(loss_node, 'loss', None, "DigitClassificationModel.get_loss()")
-        trace = trace_node(loss_node)
-        assert inp_x in trace, "Node returned from DigitClassificationModel.get_loss() does not depend on the provided input (x)"
-        assert inp_y in trace, "Node returned from DigitClassificationModel.get_loss() does not depend on the provided labels (y)"
+   
+        grad_y = torch.autograd.grad(loss, inp_x, allow_unused=True, retain_graph=True)
+        grad_x = torch.autograd.grad(loss, inp_y, allow_unused=True, retain_graph=True)
+        
+        assert grad_x[0] != None, "Node returned from digitclassifier_loss() does not depend on the provided input (x), check DigitClassificationModel.forward()"
+        assert grad_y[0] != None, "Node returned from digitclassifier_loss() does not depend on the provided labels (y), digitclassifier_loss()"
 
-        for node in trace:
-            assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                "DigitClassificationModel.get_loss() should not use additional parameters not used by DigitClassificationModel.run()")
 
     tracker.add_points(2) # Partial credit for passing sanity checks
 
-    model.train(dataset)
+    train.train_digitclassifier(model, dataset)
 
-    test_logits = model.run(nn.Constant(dataset.test_images)).data
-    test_predicted = np.argmax(test_logits, axis=1)
+
+    test_logits = model(torch.tensor(dataset.test_images)).data
+    test_predicted = np.argmax(test_logits, axis=1).detach().numpy()
     test_accuracy = np.mean(test_predicted == dataset.test_labels)
 
     accuracy_threshold = 0.97
@@ -520,6 +504,8 @@ def check_digit_classification(tracker):
 @test('q4', points=7)
 def check_lang_id(tracker):
     import models
+    import train
+    import losses
     model = models.LanguageIDModel()
     dataset = backend.LanguageIDDataset(model)
 
@@ -528,52 +514,134 @@ def check_lang_id(tracker):
         start = dataset.dev_buckets[-1, 0]
         end = start + batch_size
         inp_xs, inp_y = dataset._encode(dataset.dev_x[start:end], dataset.dev_y[start:end])
-        inp_xs = inp_xs[:word_length]
+        inp_xs = torch.tensor(inp_xs[:word_length], requires_grad=True)
 
-        output_node = model.run(inp_xs)
-        verify_node(output_node, 'node', (batch_size, len(dataset.language_names)), "LanguageIDModel.run()")
-        trace = trace_node(output_node)
-        for inp_x in inp_xs:
-            assert inp_x in trace, "Node returned from LanguageIDModel.run() does not depend on all of the provided inputs (xs)"
+        output_node = model(inp_xs)
+        verify_node(output_node, 'tensor', (batch_size, len(dataset.language_names)), "LanguageIDModel.forward()")
+
+        grad = torch.autograd.grad(torch.sum(output_node), inp_xs, allow_unused=True, retain_graph=True)
+        for gradient in grad:
+            assert gradient != None, "Output returned from LanguageIDModel.forward() does not depend on all of the provided inputs (xs)"
 
         # Word length 1 does not use parameters related to transferring the
         # hidden state across timesteps, so initial parameter detection is only
         # run for longer words
-        if word_length > 1:
-            if detected_parameters is None:
-                detected_parameters = [node for node in trace if isinstance(node, nn.Parameter)]
 
-            for node in trace:
-                assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                    "Calling LanguageIDModel.run() multiple times should always re-use the same parameters, but a new nn.Parameter object was detected")
+
 
     for batch_size, word_length in ((1, 1), (2, 1), (2, 6), (4, 8)):
         start = dataset.dev_buckets[-1, 0]
         end = start + batch_size
         inp_xs, inp_y = dataset._encode(dataset.dev_x[start:end], dataset.dev_y[start:end])
-        inp_xs = inp_xs[:word_length]
-        loss_node = model.get_loss(inp_xs, inp_y)
-        trace = trace_node(loss_node)
-        for inp_x in inp_xs:
-            assert inp_x in trace, "Node returned from LanguageIDModel.run() does not depend on all of the provided inputs (xs)"
-        assert inp_y in trace, "Node returned from LanguageIDModel.get_loss() does not depend on the provided labels (y)"
+        inp_xs = torch.tensor(inp_xs[:word_length], requires_grad=True)
+        loss_node = losses.languageid_loss(model(inp_xs), inp_y)
+        grad = torch.autograd.grad(loss_node, inp_xs, allow_unused=True, retain_graph=True)
+        for gradient in grad:
+            assert gradient != None, "Output returned from LanguageIDModel.forward() does not depend on all of the provided inputs (xs)"
 
-        for node in trace:
-            assert not isinstance(node, nn.Parameter) or node in detected_parameters, (
-                "LanguageIDModel.get_loss() should not use additional parameters not used by LanguageIDModel.run()")
 
     tracker.add_points(2) # Partial credit for passing sanity checks
 
-    model.train(dataset)
+    train.train_languageid(model, dataset)
 
-    test_predicted_probs, test_predicted, test_correct = dataset._predict('test')
-    test_accuracy = np.mean(test_predicted == test_correct)
+
     accuracy_threshold = 0.81
+    test_accuracy = dataset.get_validation_accuracy()
     if test_accuracy >= accuracy_threshold:
         print("Your final test set accuracy is: {:%}".format(test_accuracy))
         tracker.add_points(5)
     else:
         print("Your final test set accuracy ({:%}) must be at least {:.0%} to receive full points for this question".format(test_accuracy, accuracy_threshold))
 
+@test('q5', points=1)
+def check_convolution(tracker):
+    import models
+    import train
+    import losses
+
+    model = models.DigitConvolutionalModel()
+    dataset = backend.DigitClassificationDataset2(model)
+
+    def conv2d(a, f):
+        s = f.shape + tuple(np.subtract(a.shape, f.shape) + 1)
+        strd = np.lib.stride_tricks.as_strided
+        subM = strd(a, shape = s, strides = a.strides * 2)
+        return np.einsum('ij,ijkl->kl', f, subM)
+
+    detected_parameters = None
+    
+    for batch_size in (1, 2, 4):
+        inp_x = torch.tensor(dataset[:batch_size]['x'], dtype=torch.float, requires_grad=True)
+        inp_y = torch.tensor(dataset[:batch_size]['label'], dtype=torch.float, requires_grad=True) 
+        loss =  losses.digitconvolution_Loss(model(inp_x), inp_y)
+
+        verify_node(loss, 'tensor', (1,), "DigitClassificationModel.run()")
+
+   
+        grad_y = torch.autograd.grad(loss, inp_x, allow_unused=True, retain_graph=True)
+        grad_x = torch.autograd.grad(loss, inp_y, allow_unused=True, retain_graph=True)
+        
+        assert grad_x[0] != None, "Node returned from RegressionModel.get_loss() does not depend on the provided input (x)"
+        assert grad_y[0] != None, "Node returned from RegressionModel.get_loss() does not depend on the provided labels (y)"
+    
+    for matrix_size in (2, 4, 6): #Test 3 random convolutions to test convolve() function
+        weights = np.random.rand(2,2)
+        input = np.random.rand(matrix_size, matrix_size)
+        student_output = models.Convolve(torch.Tensor(input), torch.Tensor(weights))
+        actual_output = conv2d(input,weights)
+        assert np.isclose(student_output, actual_output).all(), "The convolution returned by Convolve() does not match expected output"
+
+    tracker.add_points(1/2) # Partial credit for testing whether convolution function works
+
+    train.Train_DigitConvolution(model, dataset)
+
+
+    test_logits = model(torch.tensor(dataset.test_images)).data
+    test_predicted = np.argmax(test_logits, axis=1).detach().numpy()
+    test_accuracy = np.mean(test_predicted == dataset.test_labels)
+
+    accuracy_threshold = 0.80
+    if test_accuracy >= accuracy_threshold:
+        print("Your final test set accuracy is: {:%}".format(test_accuracy))
+        tracker.add_points(0.5)
+    else:
+        print("Your final test set accuracy ({:%}) must be at least {:.0%} to receive full points for this question".format(test_accuracy, accuracy_threshold))
+
+@test('q6', points=1)
+def check_attention(tracker):
+    import models
+    
+    for block_size in [2,4,16]:
+        layer_size = np.random.randint(2,10)
+
+        att_block = models.Attention(layer_size, block_size)
+        batch_size = np.random.randint(1,10)
+
+        input = torch.rand(batch_size, block_size, layer_size)
+
+        
+        #Define weights to manually set k, q, and v layers to
+        k_weight = torch.rand(layer_size,layer_size).reshape(layer_size,layer_size)
+        q_weight = torch.rand(layer_size,layer_size).reshape(layer_size,layer_size)
+        v_weight = torch.rand(layer_size,layer_size).reshape(layer_size,layer_size)
+
+        #Manually assign attention weights, makes autograding easier
+        with torch.no_grad():
+            att_block.k_layer.weight = torch.nn.Parameter(torch.ones((layer_size,layer_size)) * k_weight)
+            att_block.q_layer.weight = torch.nn.Parameter(torch.ones((layer_size,layer_size)).reshape(layer_size,layer_size) * q_weight)
+            att_block.v_layer.weight = torch.nn.Parameter(torch.ones((layer_size,layer_size)).reshape(layer_size,layer_size) * v_weight)
+        
+        
+        T = input.shape[1]
+        
+        expected_output = torch.matmul(att_block.q_layer(input),torch.movedim(att_block.k_layer(input),1,2))/layer_size**0.5
+
+        expected_output = expected_output.masked_fill(att_block.mask[:,:,:T,:T] == 0, float('-inf'))[0]
+        
+        output = torch.matmul(nn.functional.softmax(expected_output, dim=-1),att_block.v_layer(input))
+
+
+        assert torch.all(torch.isclose(output, att_block(input))), "The output returned by Attention() does not match expected output"
+    tracker.add_points(1)
 if __name__ == '__main__':
     main()
