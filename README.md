@@ -3,8 +3,10 @@
 我学习的CS188课程是基于 UC Berkeley的CS 188 Spring 2025 <br>
 [CS188课程官网](https://inst.eecs.berkeley.edu/~cs188/sp25/#cs-188-spring-2025) <br>
 本仓库中original_zip存放的是课程提供的project源码 <br>
+几个Report的markdown文件是我做各个project的一些记录 <br>
+Notes文件夹中有对cs188课程官方笔记的粗略中文翻译(具体说明详见Notes/README.md)<br>
+image文件夹中存放各个markdown文件中的图片<br>
 其余的各个文件夹是我所完成的project <br>
-Report则是我做各个project的一些记录 <br>
 
 课程license：<br>
 ```

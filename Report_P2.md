@@ -33,7 +33,7 @@ Project2要求实现多智能体对抗的Minimax算法(包含α-β剪枝),Expect
                     score -= 1 / (ghost_distance + 1) # Encourage staying away from ghosts
         return score
 ```
-运行结果也是非常好，Q1十次测试中最第一次分数是1094.
+运行结果也是非常好，Q1十次测试中最低的一次分数是1094.
 
 ### Q2：Minimax
 代码如下：
@@ -84,7 +84,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
 ```
 
 ### Q3:Alpha-Beta Pruning
-在minmax的基础上进行修改：
+在minmax的基础上进行修改，注意参考cs188课程notes中给出的伪代码：
 ```python
 class AlphaBetaAgent(MultiAgentSearchAgent):
     def getAction(self, gameState: GameState):

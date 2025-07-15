@@ -1,0 +1,139 @@
+# Approximate Q-Learning 简介
+
+## 什么是 Approximate Q-Learning？
+
+Approximate Q-Learning 是一种强化学习（Reinforcement Learning, RL）算法，用于在复杂环境中近似估计最优的动作值函数（Q-function）。与传统的表格型 Q-Learning 不同，Approximate Q-Learning 使用函数近似器（例如神经网络或线性模型）来表示 Q 值，从而能够处理高维状态空间或连续动作空间的问题。它特别适合在状态空间过大或无法完全枚举的情况下使用。
+
+---
+
+## 核心概念
+
+### 1. Q-Learning 基础
+Q-Learning 是一种基于值迭代的强化学习方法，旨在学习一个动作值函数 \( Q(s, a) \)，表示在状态 \( s \) 下执行动作 \( a \) 后获得的期望累积回报。其更新规则为：
+
+\[
+Q(s, a) \leftarrow Q(s, a) + \alpha \left[ r + \gamma \max_{a'} Q(s', a') - Q(s, a) \right]
+\]
+
+其中：
+- \( \alpha \)：学习率
+- \( r \)：即时奖励
+- \( \gamma \)：折扣因子
+- \( s' \)：下一状态
+- \( a' \)：下一动作
+
+传统 Q-Learning 使用表格存储所有状态-动作对的 Q 值，但在高维或连续状态空间中，这种方法会面临“维度灾难”。
+
+### 2. 函数近似
+Approximate Q-Learning 通过引入函数近似器（如线性模型或神经网络）来替代表格存储。Q 函数被建模为一个参数化的函数：
+
+\[
+Q(s, a; \theta) \approx Q^*(s, a)
+\]
+
+其中 \( \theta \) 是函数的参数（例如神经网络的权重）。目标是通过优化 \( \theta \) 使近似 Q 函数尽可能接近真实的 \( Q^* \)。
+
+### 3. 更新规则
+在 Approximate Q-Learning 中，参数 \( \theta \) 通过最小化损失函数来更新，通常使用梯度下降法。损失函数基于时序差分（Temporal Difference, TD）误差：
+
+\[
+L(\theta) = \mathbb{E} \left[ \left( r + \gamma \max_{a'} Q(s', a'; \theta) - Q(s, a; \theta) \right)^2 \right]
+\]
+
+梯度更新规则为：
+
+\[
+\theta \leftarrow \theta + \alpha \left( r + \gamma \max_{a'} Q(s', a'; \theta) - Q(s, a; \theta) \right) \nabla_\theta Q(s, a; \theta)
+\]
+
+---
+
+## 实现步骤
+
+1. **初始化**：
+   - 初始化函数近似器参数 \( \theta \)。
+   - 选择动作选择策略（如 ε-贪婪策略）。
+
+2. **与环境交互**：
+   - 在状态 \( s \) 下，根据当前策略选择动作 \( a \)。
+   - 执行动作，观察奖励 \( r \) 和下一状态 \( s' \)。
+
+3. **计算目标值**：
+   - 使用当前 Q 函数估计目标值：\( r + \gamma \max_{a'} Q(s', a'; \theta) \)。
+
+4. **更新参数**：
+   - 计算 TD 误差并通过梯度下降更新 \( \theta \)。
+
+5. **循环迭代**：
+   - 重复步骤 2-4，直到收敛或达到最大迭代次数。
+
+---
+
+## 优势与挑战
+
+### 优势
+- **泛化能力**：通过函数近似，能够泛化到未见过的状态-动作对。
+- **高效性**：适合高维或连续状态空间，减少存储需求。
+- **灵活性**：可以与深度学习结合（如 Deep Q-Network, DQN）。
+
+### 挑战
+- **非平稳性**：函数近似可能导致 Q 值估计的不稳定。
+- **过拟合**：复杂模型可能过拟合训练数据。
+- **探索与利用**：需要在探索新动作和利用已有知识之间平衡。
+
+---
+
+## 应用场景
+Approximate Q-Learning 广泛应用于需要处理复杂环境的任务，例如：
+- 游戏 AI（如 Atari 游戏中的 DQN）
+- 机器人控制
+- 自动驾驶
+- 资源分配优化
+
+---
+
+## 代码示例（伪代码）
+以下是一个简单的 Approximate Q-Learning 伪代码示例：
+
+<xaiArtifact artifact_id="c064d9a1-7aaa-458b-a782-387fe777e0f4" artifact_version_id="b06caecf-bbf9-4f36-a860-3fb5d872766f" title="Approximate_Q_Learning.py" contentType="text/python">
+
+import numpy as np
+
+# 初始化参数
+theta = initialize_parameters()  # 函数近似器参数
+alpha = 0.01  # 学习率
+gamma = 0.99  # 折扣因子
+epsilon = 0.1  # 探索率
+
+def approximate_q_learning(env, num_episodes):
+    for episode in range(num_episodes):
+        state = env.reset()
+        done = False
+        while not done:
+            # 选择动作（ε-贪婪策略）
+            if np.random.rand() < epsilon:
+                action = env.action_space.sample()
+            else:
+                action = np.argmax([Q(state, a, theta) for a in env.action_space])
+            
+            # 与环境交互
+            next_state, reward, done, _ = env.step(action)
+            
+            # 计算目标值
+            target = reward + gamma * np.max([Q(next_state, a, theta) for a in env.action_space])
+            
+            # 计算 TD 误差
+            td_error = target - Q(state, action, theta)
+            
+            # 更新参数
+            theta += alpha * td_error * gradient_Q(state, action, theta)
+            
+            state = next_state
+
+# Q 函数（由函数近似器定义）
+def Q(state, action, theta):
+    return np.dot(state, theta[action])  # 线性近似示例
+
+# 梯度计算
+def gradient_Q(state, action, theta):
+    return state  # 线性近似梯度
